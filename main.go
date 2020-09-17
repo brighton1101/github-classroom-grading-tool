@@ -47,6 +47,10 @@ func GithubOrgFromEnv() (string, error) {
     return fromEnv("GITHUB_CLASSROOM_ORG")
 }
 
+func LoggingDestFromEnv() (string, error) {
+    return fromEnv("GRADING_LOGGING_DEST")
+}
+
 /**
  * Accessor function to get env var from system.
  */
@@ -98,6 +102,10 @@ func OrgRepos(ctx context.Context, client *github.Client, org string) ([]*github
     return allRepos, nil
 }
 
+func RepoNameByPrefixAndUser(pref, user string) string {
+    return fmt.Sprintf("%s%s", pref, user)
+}
+
 /**
  * Github classroom repos are created with the following naming standard:
  * `{some assignment prefix}{username}`, with a good example being
@@ -108,9 +116,28 @@ func OrgRepos(ctx context.Context, client *github.Client, org string) ([]*github
  * then lives under the org
  */
 func RepoByPrefixAndUser(ctx context.Context, client *github.Client, org, pref, user string) (*github.Repository, error) {
-    rname := fmt.Sprintf("%s%s", pref, user)
+    rname := RepoNameByPrefixAndUser(pref, user)
     repo, _, err := client.Repositories.Get(ctx, org, rname)
     return repo, err
+}
+
+type PostIssueOptions struct {
+    OrgName string
+    RepoName string
+    Header string
+    Body string
+}
+
+/**
+ * Posts an issue to a Github repo.
+ */
+func PostIssue(ctx context.Context, client *github.Client, opts *PostIssueOptions) error {
+    issueopt := &github.IssueRequest{
+        Title: &opts.Header,
+        Body: &opts.Body,
+    }
+    _, _, err := client.Issues.Create(ctx, opts.OrgName, opts.RepoName, issueopt)
+    return err
 }
 
 /**
@@ -187,7 +214,6 @@ func main() {
         return
     }
 
-
     // Get repos by org
     // Github paginates to 30 results
     repos, err := OrgRepos(ctx, client, orgname)
@@ -197,6 +223,16 @@ func main() {
     }
     nrepos := FilterReposByPref(repos, "assignment-3-")
     fmt.Println(len(nrepos))
+
+    /*
+    // Test post issue
+    issueopts := &PostIssueOptions{
+        OrgName: "brighton1101",
+        RepoName: "hacksc2020",
+        Header: "maybe delete",
+        Body: "justatest",
+    }
+    PostIssue(ctx, client, issueopts) */
 
     // Read username map
     m1, _, _ := ReadUsernameMap("test.csv")
