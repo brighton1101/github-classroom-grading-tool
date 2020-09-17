@@ -9,6 +9,7 @@ import "errors"
 import "context"
 import "strings"
 import "encoding/csv"
+import "log"
 
 import "github.com/google/go-github/v32/github"
 import "golang.org/x/oauth2"
@@ -47,6 +48,9 @@ func GithubOrgFromEnv() (string, error) {
     return fromEnv("GITHUB_CLASSROOM_ORG")
 }
 
+/**
+ * Gets GRADING_LOGGING_DEST string from env
+ */
 func LoggingDestFromEnv() (string, error) {
     return fromEnv("GRADING_LOGGING_DEST")
 }
@@ -121,6 +125,7 @@ func RepoByPrefixAndUser(ctx context.Context, client *github.Client, org, pref, 
     return repo, err
 }
 
+// Wrapper struct for posting issues
 type PostIssueOptions struct {
     OrgName string
     RepoName string
@@ -192,6 +197,24 @@ func main() {
         fmt.Println(derr)
         return
     }
+
+    asnmtprefix := "assignment-3-"
+
+    logdir, err := LoggingDestFromEnv()
+    if err != nil {
+        fmt.Println(err)
+        return
+    }
+
+    // Set up logging
+    f, err := os.OpenFile(fmt.Sprintf("%s/%s.log", logdir, asnmtprefix), os.O_RDWR | os.O_CREATE | os.O_APPEND, 0666)
+    if err != nil {
+        fmt.Println(err)
+        return
+    }
+    defer f.Close()
+    log.SetOutput(f)
+    log.Println("test")
 
     // Fetch token
     token, terr := GithubTokenFromEnv()
