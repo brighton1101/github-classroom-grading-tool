@@ -1,11 +1,18 @@
 # Grading tool for Github Classroom, written in Go
 
+### Automating the clicking around when grading student assignments
 
-If you get the error:
+### Single Dependency
+- go 1.12
+
+### Usage:
 ```
-Problem getting GITHUB_AUTH_TOKEN from environment. Make sure it's set.
+go build -o main.o main.go
+./main.o -u "skaterdav85" -p "test-assignment-" -f
 ```
-and you are sure you have set the `GITHUB_AUTH_TOKEN` env var, try doing the following
-- Find the path to your go installation (on macosx, should be `$HOME/go`)
-- Set the `GOPATH` env var (I put this in my dotfile): `export GOPATH=$HOME/go` (or wherever your go installation is)
-- Add to your path: `export PATH=$GOPATH/bin:$PATH`
+The above creates compiles the cli to `main.o`, which then can be executed
+The flags indicate the following:
+- `-u` is for github username
+- `-n` is for student name
+- `-p` is for assignment prefix
+- `-f` is for leaving feedback in form of github issue
