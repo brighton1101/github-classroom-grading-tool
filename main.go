@@ -1,21 +1,25 @@
+// A CLI for managing Github Classroom workflows
+// Brighton Balfrey, balfrey@usc.edu
+
 package main
 
-import "fmt"
-import "runtime"
-import "os"
-import "os/exec"
-import "io"
-import "errors"
-import "context"
-import "strings"
-import "encoding/csv"
-import "log"
-import "bufio"
-import "flag"
-
-import "github.com/google/go-github/v32/github"
-import "golang.org/x/oauth2"
-import "github.com/joho/godotenv"
+import (
+    "fmt"
+    "runtime"
+    "os"
+    "os/exec"
+    "io"
+    "errors"
+    "context"
+    "strings"
+    "encoding/csv"
+    "log"
+    "bufio"
+    "flag"
+    "github.com/google/go-github/v32/github"
+    "golang.org/x/oauth2"
+    "github.com/joho/godotenv"
+)
 
 /**
  * Open url in web browser
@@ -53,6 +57,13 @@ func GithubOrgFromEnv() (string, error) {
  */
 func LoggingDestFromEnv() (string, error) {
     return fromEnv("GRADING_LOGGING_DEST")
+}
+
+/**
+ * Fetches GITHUB_USERNAME_MAP string from env
+ */
+func UsernameMapPathFromEnv() (string, error) {
+    return fromEnv("GITHUB_USERNAME_MAP")
 }
 
 /**
@@ -145,8 +156,11 @@ func PostIssue(ctx context.Context, client *github.Client, opts *PostIssueOption
     return err
 }
 
+/**
+ * Get url to repo from repo object
+ */
 func RepoUrl(repo *github.Repository) string {
-    return *repo.
+    return *repo.HTMLURL
 }
 
 /**
@@ -208,6 +222,32 @@ func GatherInput() (string, error) {
     return in, nil
 }
 
+/**
+ * Handles gathering and posting feedback for given repo
+ */
+func HandleIssueFeedback(ctx context.Context, client *github.Client, repo *github.Repository, org string) (string, error) {
+    fmt.Println("Enter any feedback for student:")
+    fback, err := GatherInput()
+    if err != nil {
+        return "", err
+    }
+    // Gracefully exit if no feedback provided - don't want to post empty feedback
+    if fback == "" {
+        return "", nil
+    }
+    issueopts := &PostIssueOptions{
+        // This might cause this to fail for personal repos
+        // outside of organizations. Since this is designed with
+        // Github Classroom Organizations in mind, we're betting that
+        // this property is defined
+        OrgName: org,
+        RepoName: *repo.Name,
+        Header: "[FEEDBACK]",
+        Body: fback,
+    }
+    return fback, PostIssue(ctx, client, issueopts)
+}
+
 func main() {
 
     // First we gather two pieces of information from the user
@@ -215,13 +255,19 @@ func main() {
     // 2. EITHER the students' full name, as saved in the csv
     //    that maps names to usernames, or the students' github
     //    username itself
-    prefix := flag.String("p", "",
+    in_prefix := flag.String("p", "",
         "The assignment prefix to usernames for github classroom ie 'assignment-2-'")
-    name := flag.String("n", "",
+    in_name := flag.String("n", "",
         "The students' full name to use")
-    username := flag.String("un", "",
+    in_username := flag.String("u", "",
         "The students' username to use")
+    in_postfeedback := flag.Bool("f", false,
+        "Whether or not to post feedback if entered to Github Classroom")
     flag.Parse()
+    prefix := *in_prefix
+    name := *in_name
+    username := *in_username
+    postfeedback := *in_postfeedback
 
     // Only allow users one option or the other
     if name != "" && username != "" {
@@ -232,7 +278,7 @@ func main() {
     // Load environment vars from .env file
     err := godotenv.Load()
     if err != nil {
-        fmt.Println(derr)
+        fmt.Println(err)
         return
     }
 
@@ -242,7 +288,7 @@ func main() {
         fmt.Println(err)
         return
     }
-    f, err := os.OpenFile(fmt.Sprintf("%s/%s.log", logdir, asnmtprefix), os.O_RDWR | os.O_CREATE | os.O_APPEND, 0666)
+    f, err := os.OpenFile(fmt.Sprintf("%s/%s.log", logdir, prefix), os.O_RDWR | os.O_CREATE | os.O_APPEND, 0666)
     if err != nil {
         fmt.Println(err)
         return
@@ -251,7 +297,12 @@ func main() {
     log.SetOutput(f)
 
     // Read mappings between usernames and passwords
-    name_username, username_name, err := ReadUsernameMap("test.csv")
+    mapdir, err := UsernameMapPathFromEnv()
+    if err != nil {
+        fmt.Println(err)
+        return
+    }
+    name_username, username_name, err := ReadUsernameMap(mapdir)
     if err != nil {
         fmt.Println(err)
         return
@@ -259,20 +310,22 @@ func main() {
 
     // If name is not defined, get the name from username
     if name == "" {
-        name, prs := username_name[username]
-    }
-    if !prs {
-        fmt.Println("Username not defined in csv file")
-        return
+        var prs bool
+        name, prs = username_name[username]
+        if !prs {
+            fmt.Println("Username not defined in csv file")
+            return
+        }
     }
 
     // If username is not defined, get the username from name
     if username == "" {
-        username, prs := name_username[name]
-    }
-    if !prs {
-        fmt.Println("Name not defined in csv file")
-        return
+        var prs bool
+        username, prs = name_username[name]
+        if !prs {
+            fmt.Println("Name not defined in csv file")
+            return
+        }
     }
 
     // Get orgname from env var
@@ -305,43 +358,20 @@ func main() {
     // Get repo url from repo
     url := RepoUrl(repo)
 
-
-
-    in, err := GatherInput()
-    if in != "lolol" {
-        fmt.Println(in)
-        return
-    }
-
-    
-
-    
-    log.Println("test")
-
-    fmt.Println(token)
-
-    
-
-    // Get repos by org
-    // Github paginates to 30 results
-    repos, err := OrgRepos(ctx, client, orgname)
+    // Open URL in browser
+    err = StartBrowser(url)
     if err != nil {
         fmt.Println(err)
-        return
     }
-    nrepos := FilterReposByPref(repos, "assignment-3-")
-    fmt.Println(len(nrepos))
 
-    /*
-    // Test post issue
-    issueopts := &PostIssueOptions{
-        OrgName: "brighton1101",
-        RepoName: "hacksc2020",
-        Header: "maybe delete",
-        Body: "justatest",
+    // Handle Feedback and log
+    if postfeedback {
+        fback, err := HandleIssueFeedback(ctx, client, repo, orgname)
+        if err != nil {
+            fmt.Println(err)
+            return
+        } else if fback != "" {
+            log.Println(fmt.Sprintf("Name: %s, Username: %s, Feedback: %s", name, username, fback))
+        }
     }
-    PostIssue(ctx, client, issueopts) */
-
-    
-    fmt.Println(m1)
 }
