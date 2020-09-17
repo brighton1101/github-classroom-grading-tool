@@ -10,6 +10,8 @@ import "context"
 import "strings"
 import "encoding/csv"
 import "log"
+import "bufio"
+import "flag"
 
 import "github.com/google/go-github/v32/github"
 import "golang.org/x/oauth2"
@@ -17,9 +19,7 @@ import "github.com/joho/godotenv"
 
 /**
  * Open url in web browser
- *
- * @reference https://gist.github.com/hyg/9c4afcd91fe24316cbf0
- * @param url string
+ * https://gist.github.com/hyg/9c4afcd91fe24316cbf0
  */
 func StartBrowser(url string) error {
     var err error
@@ -145,6 +145,10 @@ func PostIssue(ctx context.Context, client *github.Client, opts *PostIssueOption
     return err
 }
 
+func RepoUrl(repo *github.Repository) string {
+    return *repo.
+}
+
 /**
  * Assignment repos for specific assignments can be identified by a prefix in the
  * repository name. Given the desired prefix, return all repos with names
@@ -189,24 +193,55 @@ func ReadUsernameMap(path string) (map[string]string, map[string]string, error) 
     }
 }
 
+/**
+ * Gather input from user, terminated by the endin char
+ */
+func GatherInput() (string, error) {
+    reader := bufio.NewReader(os.Stdin)
+    in, err := reader.ReadString('\n')
+    if err != nil {
+        return "", err
+    }
+    // This is ugly. There's probably a better way to do this,
+    // but eh it's the way I knew how to do it haha
+    in = strings.Replace(in, "\n", "", -1)
+    return in, nil
+}
+
 func main() {
 
-    // Load environment vars
-    derr := godotenv.Load()
-    if derr != nil {
+    // First we gather two pieces of information from the user
+    // 1. The assignment prefix (ie, 'assignment-2-') AND
+    // 2. EITHER the students' full name, as saved in the csv
+    //    that maps names to usernames, or the students' github
+    //    username itself
+    prefix := flag.String("p", "",
+        "The assignment prefix to usernames for github classroom ie 'assignment-2-'")
+    name := flag.String("n", "",
+        "The students' full name to use")
+    username := flag.String("un", "",
+        "The students' username to use")
+    flag.Parse()
+
+    // Only allow users one option or the other
+    if name != "" && username != "" {
+        fmt.Println("Using -n and -un together is not allowed. Please only specify one.")
+        return
+    }
+
+    // Load environment vars from .env file
+    err := godotenv.Load()
+    if err != nil {
         fmt.Println(derr)
         return
     }
 
-    asnmtprefix := "assignment-3-"
-
+    // Set up logging based on GRADING_LOGGING_DEST var
     logdir, err := LoggingDestFromEnv()
     if err != nil {
         fmt.Println(err)
         return
     }
-
-    // Set up logging
     f, err := os.OpenFile(fmt.Sprintf("%s/%s.log", logdir, asnmtprefix), os.O_RDWR | os.O_CREATE | os.O_APPEND, 0666)
     if err != nil {
         fmt.Println(err)
@@ -214,28 +249,78 @@ func main() {
     }
     defer f.Close()
     log.SetOutput(f)
-    log.Println("test")
 
-    // Fetch token
+    // Read mappings between usernames and passwords
+    name_username, username_name, err := ReadUsernameMap("test.csv")
+    if err != nil {
+        fmt.Println(err)
+        return
+    }
+
+    // If name is not defined, get the name from username
+    if name == "" {
+        name, prs := username_name[username]
+    }
+    if !prs {
+        fmt.Println("Username not defined in csv file")
+        return
+    }
+
+    // If username is not defined, get the username from name
+    if username == "" {
+        username, prs := name_username[name]
+    }
+    if !prs {
+        fmt.Println("Name not defined in csv file")
+        return
+    }
+
+    // Get orgname from env var
+    orgname, oerr  := GithubOrgFromEnv()
+    if oerr != nil {
+        fmt.Println(oerr)
+        return
+    }
+
+    // Get Github token from env var
     token, terr := GithubTokenFromEnv()
     if terr != nil {
         fmt.Println(terr)
         return
     }
 
-    fmt.Println(token)
-
+    // Get context and github client
     // I think? these should be treated as singletons or
     // at least singleton-like
     ctx := context.Background()
     client := GithubClient(ctx, token)
 
-    // Fetch orgname
-    orgname, oerr  := GithubOrgFromEnv()
-    if oerr != nil {
-        fmt.Println(oerr)
+    // Get repo for user based on org, prefix, and username
+    repo, err := RepoByPrefixAndUser(ctx, client, orgname, prefix, username)
+    if err != nil {
+        fmt.Println(err)
         return
     }
+
+    // Get repo url from repo
+    url := RepoUrl(repo)
+
+
+
+    in, err := GatherInput()
+    if in != "lolol" {
+        fmt.Println(in)
+        return
+    }
+
+    
+
+    
+    log.Println("test")
+
+    fmt.Println(token)
+
+    
 
     // Get repos by org
     // Github paginates to 30 results
@@ -257,7 +342,6 @@ func main() {
     }
     PostIssue(ctx, client, issueopts) */
 
-    // Read username map
-    m1, _, _ := ReadUsernameMap("test.csv")
+    
     fmt.Println(m1)
 }
