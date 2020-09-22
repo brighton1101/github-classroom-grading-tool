@@ -179,6 +179,14 @@ func FilterReposByPref(repos []*github.Repository, pref string) []*github.Reposi
 }
 
 /**
+ * Get username from repo
+ */
+func UsernameFromRepo(repo *github.Repository, pref string) string {
+    reponame := *repo.Name
+    return strings.Replace(reponame, pref, "", 1)
+}
+
+/**
  * Reads a username map from a given csv file. Operates under the assumption that
  * the 0 index will contain the name, and the 1 index will contain the username. Returns
  * two maps, for either direction.
@@ -248,6 +256,129 @@ func HandleIssueFeedback(ctx context.Context, client *github.Client, repo *githu
     return fback, PostIssue(ctx, client, issueopts)
 }
 
+/**
+ * Handles individual repo
+ */
+func HandleRepo(ctx context.Context,
+    client *github.Client,
+    repo *github.Repository,
+    username, name, orgname string,
+    postfeedback bool) error {
+    if name == "" {
+        msg := ""
+        if postfeedback {
+            msg = "You can still post feedback below."
+        }
+        fmt.Printf("Note that username %s not found in CSV. %s\n", username, msg)
+        name = "[NAME NOT FOUND]"
+    }
+
+    // Get repo url from repo
+    url := RepoUrl(repo)
+
+    // Open URL in browser
+    err := StartBrowser(url)
+    if err != nil {
+        return err
+    }
+
+    // Handle Feedback and log
+    if postfeedback {
+        fback, err := HandleIssueFeedback(ctx, client, repo, orgname)
+        if err != nil {
+            return err
+        } else if fback != "" {
+            log.Println(fmt.Sprintf("Name: %s, Username: %s, Feedback: %s", name, username, fback))
+        }
+    }
+    return nil
+}
+
+/**
+ * Handles single student.
+ */
+func SingleStudent(ctx context.Context,
+    client *github.Client,
+    postfeedback bool,
+    prefix, orgname, username, name string,
+    username_name, name_username map[string]string) error {
+
+    // If name is not defined, get the name from username
+    if name == "" {
+        var prs bool
+        name, prs = username_name[username]
+        if !prs {
+            fmt.Printf("Note that username %s not found in csv. Trying to proceed w/o... \n", username)
+        }
+    }
+
+    // If username is not defined, get the username from name
+    if username == "" {
+        var prs bool
+        username, prs = name_username[name]
+        if !prs {
+            return errors.New(
+                fmt.Sprintf("Username for name %s not found in mapping", name))
+        }
+    }
+
+    // Get repo for user based on org, prefix, and username
+    repo, err := RepoByPrefixAndUser(ctx, client, orgname, prefix, username)
+    if err != nil {
+        return err
+    }
+
+    return HandleRepo(ctx, client, repo, username, name, orgname, postfeedback)
+}
+
+/**
+ * Handles all students in the username_name map that have assignments
+ * with the given prefix within the org
+ */
+func AllStudents(
+    ctx context.Context,
+    client *github.Client,
+    postfeedback bool,
+    prefix, orgname string,
+    username_name map[string]string) error {
+    
+    // Get all repos for the org with prefix
+    unfilteredrepos, err := OrgRepos(ctx, client, orgname)
+    if err != nil {
+        return err
+    }
+
+    // Filter by prefix for assignment
+    repos := FilterReposByPref(unfilteredrepos, prefix)
+
+    // Iterate over all repos with given prefix
+    for _, repo := range repos {
+
+        // Look up name by username
+        // Note: It's non blocking for name mapping to not be present here,
+        // but there will be a warning message.
+        username := UsernameFromRepo(repo, prefix)
+        name, prs := username_name[username]
+        if !prs {
+            name = ""
+        }
+
+        err := HandleRepo(ctx, client, repo, username, name, orgname, postfeedback)
+        if err != nil {
+            return err
+        }
+
+        if !postfeedback {
+            fmt.Print("Press enter to continue")
+            _, inerr := GatherInput()
+            if inerr != nil {
+                return inerr
+            }
+        }
+    }
+    return nil
+}
+
 func main() {
 
     // First we gather two pieces of information from the user
@@ -263,6 +394,8 @@ func main() {
         "The students' username to use")
     in_postfeedback := flag.Bool("f", false,
         "Whether or not to post feedback if entered to Github Classroom")
+    in_allstudents := flag.Bool("a", false,
+        "Handle all students, as opposed to a single student")
     flag.Parse()
     prefix := *in_prefix
     name := *in_name
@@ -271,61 +404,46 @@ func main() {
 
     // Only allow users one option or the other
     if name != "" && username != "" {
-        fmt.Println("Using -n and -un together is not allowed. Please only specify one.")
+        fmt.Println("Using -n and -u together is not allowed. Please only specify one.")
         return
     }
 
+    // Require prefix
+    if prefix == "" {
+        fmt.Println("Did not provide prefix. Cannot proceed without -p flag.")
+    }
+
     // Load environment vars from .env file
-    err := godotenv.Load()
-    if err != nil {
-        fmt.Println(err)
+    derr := godotenv.Load()
+    if derr != nil {
+        fmt.Println(derr)
         return
     }
 
     // Set up logging based on GRADING_LOGGING_DEST var
-    logdir, err := LoggingDestFromEnv()
-    if err != nil {
-        fmt.Println(err)
+    logdir, perr := LoggingDestFromEnv()
+    if perr != nil {
+        fmt.Println(perr)
         return
     }
-    f, err := os.OpenFile(fmt.Sprintf("%s/%s.log", logdir, prefix), os.O_RDWR | os.O_CREATE | os.O_APPEND, 0666)
-    if err != nil {
-        fmt.Println(err)
+    f, lerr := os.OpenFile(fmt.Sprintf("%s/%s.log", logdir, prefix), os.O_RDWR | os.O_CREATE | os.O_APPEND, 0666)
+    if lerr != nil {
+        fmt.Println(lerr)
         return
     }
     defer f.Close()
     log.SetOutput(f)
 
     // Read mappings between usernames and passwords
-    mapdir, err := UsernameMapPathFromEnv()
-    if err != nil {
-        fmt.Println(err)
+    mapdir, perr := UsernameMapPathFromEnv()
+    if perr != nil {
+        fmt.Println(perr)
         return
     }
-    name_username, username_name, err := ReadUsernameMap(mapdir)
-    if err != nil {
-        fmt.Println(err)
+    name_username, username_name, nerr := ReadUsernameMap(mapdir)
+    if nerr != nil {
+        fmt.Println(nerr)
         return
-    }
-
-    // If name is not defined, get the name from username
-    if name == "" {
-        var prs bool
-        name, prs = username_name[username]
-        if !prs {
-            fmt.Println("Username not defined in csv file")
-            return
-        }
-    }
-
-    // If username is not defined, get the username from name
-    if username == "" {
-        var prs bool
-        username, prs = name_username[name]
-        if !prs {
-            fmt.Println("Name not defined in csv file")
-            return
-        }
     }
 
     // Get orgname from env var
@@ -348,30 +466,14 @@ func main() {
     ctx := context.Background()
     client := GithubClient(ctx, token)
 
-    // Get repo for user based on org, prefix, and username
-    repo, err := RepoByPrefixAndUser(ctx, client, orgname, prefix, username)
+    var err error
+    if *in_allstudents {
+        err = AllStudents(ctx, client, postfeedback, prefix, orgname, username_name)
+    } else {
+        err = SingleStudent(
+            ctx, client, postfeedback, prefix, orgname, username, name, username_name, name_username)
+    }
     if err != nil {
         fmt.Println(err)
-        return
-    }
-
-    // Get repo url from repo
-    url := RepoUrl(repo)
-
-    // Open URL in browser
-    err = StartBrowser(url)
-    if err != nil {
-        fmt.Println(err)
-    }
-
-    // Handle Feedback and log
-    if postfeedback {
-        fback, err := HandleIssueFeedback(ctx, client, repo, orgname)
-        if err != nil {
-            fmt.Println(err)
-            return
-        } else if fback != "" {
-            log.Println(fmt.Sprintf("Name: %s, Username: %s, Feedback: %s", name, username, fback))
-        }
     }
 }
