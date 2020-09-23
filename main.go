@@ -233,8 +233,14 @@ func GatherInput() (string, error) {
 /**
  * Handles gathering and posting feedback for given repo
  */
-func HandleIssueFeedback(ctx context.Context, client *github.Client, repo *github.Repository, org string) (string, error) {
-    fmt.Println("Enter any feedback for student:")
+func HandleIssueFeedback(ctx context.Context, client *github.Client, repo *github.Repository, org, username, name string) (string, error) {
+    var displaymsg string
+    if name == "" {
+        displaymsg = fmt.Sprintf("Enter any feedback for username %s:", username)
+    } else {
+        displaymsg = fmt.Sprintf("Enter any feedback for name %s w/ username %s:", name, username)
+    }
+    fmt.Println(displaymsg)
     fback, err := GatherInput()
     if err != nil {
         return "", err
@@ -284,7 +290,7 @@ func HandleRepo(ctx context.Context,
 
     // Handle Feedback and log
     if postfeedback {
-        fback, err := HandleIssueFeedback(ctx, client, repo, orgname)
+        fback, err := HandleIssueFeedback(ctx, client, repo, orgname, username, name)
         if err != nil {
             return err
         } else if fback != "" {
