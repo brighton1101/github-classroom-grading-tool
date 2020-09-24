@@ -392,16 +392,18 @@ func main() {
     // 2. EITHER the students' full name, as saved in the csv
     //    that maps names to usernames, or the students' github
     //    username itself
+    sngmsg := "For single student:"
+    wrnmsg := "(ONLY INCLUDE ONE OF THE FOLLOWING: -u, -n)"
     in_prefix := flag.String("p", "",
         "The assignment prefix to usernames for github classroom ie 'assignment-2-'")
     in_name := flag.String("n", "",
-        "The students' full name to use")
+        fmt.Sprintf("%s The students' full name to use ie 'Brighton Balfrey' %s", sngmsg, wrnmsg))
     in_username := flag.String("u", "",
-        "The students' username to use")
+        fmt.Sprintf("%s The students' username to use ie 'brighton1101' %s", sngmsg, wrnmsg))
     in_postfeedback := flag.Bool("f", false,
-        "Whether or not to post feedback if entered to Github Classroom")
+        "Whether or not to post feedback if entered to Github Classroom. By default, this is off")
     in_allstudents := flag.Bool("a", false,
-        "Handle all students, as opposed to a single student")
+        "Handle all students, as opposed to a single student. By default, this is off.")
     flag.Parse()
     prefix := *in_prefix
     name := *in_name
